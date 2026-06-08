@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerador de Prompts Publicitários</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+        .chip-active { background-color: #3b82f6; color: white; border-color: #3b82f6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
+        .chip-inactive { background-color: #f9fafb; color: #4b5563; border-color: #e5e7eb; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Oculta os tooltips nativos quando usamos customizados (opcional, mas bom pra UI) */
+        [title] {
+            position: relative;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen overflow-hidden flex flex-col">
+
+    <div id="app" class="h-full flex flex-col">
+        
+        <header class="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 shadow-sm z-10">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                    <i class="ph-fill ph-target text-blue-600"></i> Montador de Prompts
+                </h1>
+                <p class="text-slate-500 text-sm mt-1">Engenharia de prompts para imagens publicitárias e catálogos.</p>
+            </div>
+            <div class="flex gap-3 items-center">
+                <label class="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                    <i class="ph ph-upload-simple"></i> Importar Tema (JSON)
+                    <input type="file" accept=".json" class="hidden" @change="importJSON">
+                </label>
+                <button @click="resetToDefault" class="text-slate-500 hover:text-red-500 text-sm font-medium px-2 transition-colors">
+                    Resetar Padrão
+                </button>
+            </div>
+        </header>
+
+        <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
+            <div class="w-full md:w-3/5 h-full overflow-y-auto p-6 bg-white border-r border-slate-200 relative">
+                
+                <div v-for="category in categories" :key="category.id" class="mb-10">
+                    <h2 class="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
+                        <i class="ph-fill ph-folder text-blue-500"></i> {{ category.title }}
+                    </h2>
+                    
+                    <div v-for="element in category.elements" :key="element.id" class="mb-5 ml-2 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-semibold text-slate-700 text-sm uppercase tracking-wider">{{ element.name }}</h3>
+                        </div>
+                        
+                        <div class="flex flex-wrap gap-2 mb-3">
+                            <button 
+                                v-for="option in element.options" 
+                                :key="option.text"
+                                :title="option.tooltip"
+                                @mousedown.prevent="toggleSelection(element.id, option.text)"
+                                class="px-3 py-1.5 rounded-lg text-sm border transition-all duration-200 cursor-help"
+                                :class="isSelected(element.id, option.text) ? 'chip-active' : 'chip-inactive hover:border-blue-300 hover:bg-blue-50'"
+                            >
+                                {{ option.text }}
+                            </button>
+                        </div>
+
+                        <div class="flex flex-col gap-2 mt-4 pt-3 border-t border-slate-200/60 max-w-sm">
+                            <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Adicionar nova tag</div>
+                            <input 
+                                v-model="newTagNames[element.id]" 
+                                type="text" 
+                                placeholder="Nome da tag (ex: Neon)" 
+                                class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 bg-white"
+                            >
+                            <div class="flex">
+                                <input 
+                                    v-model="newTagTooltips[element.id]" 
+                                    @keyup.enter="addCustomTag(element.id)"
+                                    type="text" 
+                                    placeholder="Breve explicação (opcional)" 
+                                    class="flex-1 border border-slate-300 rounded-l-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 bg-white"
+                                >
+                                <button 
+                                    @click="addCustomTag(element.id)"
+                                    class="bg-slate-200 text-slate-700 px-3 py-1.5 rounded-r-lg text-sm hover:bg-slate-300 font-medium transition-colors border-y border-r border-slate-300"
+                                    title="Salvar nova tag"
+                                >
+                                    <i class="ph-bold ph-plus"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="w-full md:w-2/5 h-full bg-slate-50 flex flex-col relative border-l border-slate-200">
+                
+                <!-- Abas -->
+                <div class="flex border-b border-slate-200 bg-white shrink-0">
+                    <button @click="activeTab = 'editor'" :class="activeTab === 'editor' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'" class="flex-1 py-3 text-sm font-semibold border-b-2 transition-colors flex items-center justify-center gap-2">
+                        <i class="ph-fill ph-pencil-simple"></i> Editor
+                    </button>
+                    <button @click="activeTab = 'saved'" :class="activeTab === 'saved' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'" class="flex-1 py-3 text-sm font-semibold border-b-2 transition-colors flex items-center justify-center gap-2">
+                        <i class="ph-fill ph-bookmark-simple"></i> Salvos ({{ savedPrompts.length }})
+                    </button>
+                </div>
+
+                <!-- Aba Editor -->
+                <div v-show="activeTab === 'editor'" class="flex-1 flex flex-col p-6 overflow-y-auto">
+                    
+                    <div class="relative flex-1 flex flex-col min-h-[250px]">
+                        <textarea 
+                            ref="promptTextarea"
+                            v-model="manualPrompt" 
+                            @input="onTextareaInput"
+                            class="w-full flex-1 p-5 border border-slate-300 rounded-xl bg-white shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none text-slate-700 leading-relaxed font-mono text-base transition-all"
+                            placeholder="Seu prompt aparecerá aqui...&#10;&#10;1. Selecione as tags na esquerda para montar a estrutura base.&#10;2. Edite livremente o texto se precisar.&#10;3. Para adicionar novas tags sem apagar o que já escreveu, deixe o cursor piscando aqui e clique na tag desejada!"
+                        ></textarea>
+                        
+                        <transition name="fade">
+                            <button 
+                                v-if="isManuallyEdited && manualPrompt" 
+                                @click="syncFromSelections"
+                                class="absolute top-4 right-4 bg-slate-800/90 backdrop-blur text-white text-xs px-3 py-1.5 rounded-lg shadow-md hover:bg-slate-700 flex items-center gap-1.5 transition-all"
+                                title="Sobrescrever texto organizando as tags selecionadas"
+                            >
+                                <i class="ph ph-arrows-clockwise"></i> Regerar via Tags
+                            </button>
+                        </transition>
+                    </div>
+
+                    <div class="flex gap-3 mt-6 pt-4 border-t border-slate-200 shrink-0">
+                        <button @click="clearAll" class="px-3 py-3 text-slate-500 hover:text-red-600 hover:bg-red-50 font-medium text-sm rounded-xl transition-colors" title="Limpar tudo">
+                            <i class="ph-bold ph-trash"></i>
+                        </button>
+                        <button @click="saveCurrentPrompt" :disabled="!manualPrompt.trim()" class="flex-1 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50">
+                            <i class="ph ph-floppy-disk"></i> Salvar na Biblioteca
+                        </button>
+                        <button @click="copyPrompt" :disabled="!manualPrompt.trim()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition-all disabled:opacity-50">
+                            <i :class="copied ? 'ph-bold ph-check text-green-300' : 'ph-bold ph-copy'"></i>
+                            {{ copied ? 'Copiado!' : 'Copiar Prompt' }}
+                        </button>
+                    </div>
+                </div>
+
+                <div v-show="activeTab === 'saved'" class="flex-1 p-6 overflow-y-auto bg-slate-50">
+                    <div v-if="savedPrompts.length === 0" class="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+                        <i class="ph-fill ph-folder-open text-5xl opacity-50"></i>
+                        <p class="text-sm font-medium">Nenhum prompt salvo ainda.</p>
+                    </div>
+                    
+                    <div v-else class="flex flex-col gap-3">
+                        <div v-for="(prompt, index) in savedPrompts" :key="index" class="bg-white border border-slate-200 p-4 rounded-xl shadow-sm hover:border-blue-300 transition-colors">
+                            <p class="text-sm text-slate-700 line-clamp-4 mb-3 font-mono leading-relaxed">{{ prompt.text }}</p>
+                            <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+                                <span class="text-xs font-medium text-slate-400">{{ new Date(prompt.date).toLocaleDateString() }}</span>
+                                <div class="flex gap-1.5">
+                                    <button @click="loadSavedPrompt(prompt.text)" class="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-bold transition-colors">
+                                        Editar
+                                    </button>
+                                    <button @click="copyText(prompt.text)" class="text-xs bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-bold transition-colors">
+                                        Copiar
+                                    </button>
+                                    <button @click="deleteSavedPrompt(index)" class="text-xs text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors" title="Excluir">
+                                        <i class="ph-bold ph-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <transition name="fade">
+            <div v-if="toast.visible" class="fixed bottom-6 right-6 px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 z-50 text-sm font-semibold text-white" :class="toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'">
+                <i :class="toast.type === 'error' ? 'ph-bold ph-warning-circle' : 'ph-bold ph-check-circle'"></i>
+                {{ toast.message }}
+            </div>
+        </transition>
+
+        <transition name="fade">
+            <div v-if="showConfirmModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-xl">
+                    <h3 class="text-lg font-bold text-slate-800 mb-2">Tem certeza?</h3>
+                    <p class="text-sm text-slate-600 mb-6">Isso apagará todas as tags customizadas que você adicionou e voltará ao padrão de fábrica.</p>
+                    <div class="flex gap-3 justify-end">
+                        <button @click="showConfirmModal = false" class="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
+                        <button @click="confirmReset" class="px-4 py-2 text-sm font-medium bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors">Sim, Resetar</button>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+    </div>
+
+    <script>
+        const { createApp, ref, reactive, watch, onMounted } = Vue;
+
+        const defaultData = [
+            {
+                id: 'cat1', title: '1. Física Real',
+                elements: [
+                    { id: 'assunto', name: 'Assunto Principal', prefix: 'Fotografia publicitária de', options: [
+                        { text: 'Frasco de perfume luxuoso', tooltip: 'Ideal para produtos de beleza com acabamento premium.' },
+                        { text: 'Relógio esportivo masculino', tooltip: 'Produto metálico com reflexos dinâmicos.' },
+                        { text: 'Embalagem de skincare minimalista', tooltip: 'Foco em superfícies foscas e clean.' }
+                    ] },
+                    { id: 'superficie', name: 'Superfície de Apoio', prefix: 'repousando sobre', options: [
+                        { text: 'Mármore polido', tooltip: 'Gera reflexos nítidos e transmite luxo e limpeza.' },
+                        { text: 'Pedra ardósia escura', tooltip: 'Contraste excelente para produtos claros e metálicos.' },
+                        { text: 'Espelho d\'água cristalino', tooltip: 'Reflexo perfeito com leves ondulações naturais e atmosfera fresca.' },
+                        { text: 'Pódio acrílico fosco', tooltip: 'Estética contemporânea e geometria limpa.' }
+                    ] },
+                    { id: 'luz', name: 'Iluminação', prefix: 'Iluminação:', options: [
+                        { text: 'Softbox a 45 graus', tooltip: 'Iluminação clássica de estúdio, preenche detalhes suavemente.' },
+                        { text: 'Rim light (luz de borda)', tooltip: 'Destaca a silhueta do produto, separando-o do fundo.' },
+                        { text: 'Luz volumétrica de janela', tooltip: 'Raios de luz visíveis, criando um clima natural e aconchegante.' },
+                        { text: 'Iluminação dramática de alto contraste', tooltip: 'Sombras duras, perfeito para impacto publicitário.' }
+                    ] },
+                    { id: 'lente', name: 'Lente e Foco', prefix: 'Capturado com', options: [
+                        { text: 'Lente macro 100mm', tooltip: 'Foco extremo em detalhes, com fundo completamente borrado.' },
+                        { text: 'Lente 85mm', tooltip: 'Padrão da indústria para produtos sem causar distorção.' },
+                        { text: 'Profundidade de campo rasa', tooltip: 'Destaca apenas o objeto principal, criando o efeito "bokeh" no fundo.' }
+                    ] },
+                    { id: 'acabamento', name: 'Acabamento Visual', prefix: 'Estilo visual:', options: [
+                        { text: 'Fotorealismo 8K', tooltip: 'Máxima definição e nitidez.' },
+                        { text: 'Textura altamente tátil', tooltip: 'O espectador sente que pode tocar o material.' },
+                        { text: 'Fotografia editorial comercial', tooltip: 'Estilo limpo, direto e focado em venda.' }
+                    ] }
+                ]
+            },
+            {
+                id: 'cat2', title: '2. Geometria',
+                elements: [
+                    { id: 'pose', name: 'Posição do Produto', prefix: 'Posição:', options: [
+                        { text: 'Em pé e centralizado', tooltip: 'Postura clássica, vertical e imponente.' },
+                        { text: 'Inclinado a 30 graus', tooltip: 'Dinâmico, quebra a rigidez do grid.' },
+                        { text: 'Flutuando levemente', tooltip: 'Adiciona leveza, levitação e um toque moderno à cena.' }
+                    ] },
+                    { id: 'angulo', name: 'Ângulo de Câmera', prefix: 'Ângulo:', options: [
+                        { text: 'Visão top-down', tooltip: 'Câmera exatamente acima do produto olhando para baixo.' },
+                        { text: 'Low angle', tooltip: 'Câmera de baixo para cima, faz o objeto parecer gigante e heróico.' },
+                        { text: 'Nível dos olhos', tooltip: 'Perspectiva reta, neutra, excelente para e-commerce.' }
+                    ] }
+                ]
+            },
+            {
+                id: 'cat3', title: '3. Restrições e Ambiente',
+                elements: [
+                    { id: 'cor', name: 'Paleta de Cores', prefix: 'Paleta de cores principal:', options: [
+                        { text: 'Tons neutros e minimalistas', tooltip: 'Brancos, beges e cinzas, permitindo que o produto brilhe.' },
+                        { text: 'Preto e dourado elegante', tooltip: 'Combinação clássica de luxo e sofisticação.' },
+                        { text: 'Verde sálvia e tons terrosos', tooltip: 'Ideal para produtos naturais, veganos e ecológicos.' }
+                    ] },
+                    { id: 'restricao', name: 'Restrições (+)', prefix: 'Ambiente:', options: [
+                        { text: 'Fundo estúdio perfeitamente limpo', tooltip: 'Garante uma renderização extra limpa, sem sujeiras processuais.' },
+                        { text: 'Sem pessoas no enquadramento', tooltip: 'Força a IA a focar apenas no produto.' },
+                        { text: 'Composição minimalista com espaço negativo', tooltip: 'Deixa área vazia para adicionar texto em ferramentas de design depois.' }
+                    ] }
+                ]
+            },
+            {
+                id: 'cat4', title: '4. Dimensões e Proporções',
+                elements: [
+                    { id: 'dimensao', name: 'Aspect Ratio (Midjourney/DALL-E)', prefix: 'Parâmetro técnico:', options: [
+                        { text: '--ar 16:9', tooltip: 'Paisagem. Ideal para banners de site, YouTube e Desktop.' },
+                        { text: '--ar 9:16', tooltip: 'Vertical. Otimizado para Stories, Reels e TikTok.' },
+                        { text: '--ar 1:1', tooltip: 'Quadrado. Formato padrão para o Feed do Instagram.' },
+                        { text: '--ar 4:5', tooltip: 'Retrato. Ocupa a tela inteira do Feed sem cortes laterais.' }
+                    ] }
+                ]
+            }
+        ];
+
+        createApp({
+            setup() {
+                const categories = ref([]);
+                const selections = reactive({});
+                const newTagNames = reactive({});
+                const newTagTooltips = reactive({});
+                const savedPrompts = ref([]);
+                
+                const activeTab = ref('editor');
+                const copied = ref(false);
+                
+                const manualPrompt = ref("");
+                const isManuallyEdited = ref(false);
+                const promptTextarea = ref(null);
+
+                const toast = reactive({ visible: false, message: '', type: 'success' });
+                const showToast = (msg, type = 'success') => {
+                    toast.message = msg;
+                    toast.type = type;
+                    toast.visible = true;
+                    setTimeout(() => toast.visible = false, 4000);
+                };
+
+                const showConfirmModal = ref(false);
+                
+                onMounted(() => {
+                    const localData = localStorage.getItem('promptCategories_Publicitario');
+                    if (localData) {
+                        try {
+                            let parsed = JSON.parse(localData);
+                            
+                            // Migração de strings para objetos, caso tenha resquícios
+                            parsed.forEach(cat => {
+                                cat.elements.forEach(el => {
+                                    if (el.options && el.options.length > 0 && typeof el.options[0] === 'string') {
+                                        el.options = el.options.map(opt => ({ text: opt, tooltip: '' }));
+                                    }
+                                });
+                            });
+
+                            // Garante que a categoria Dimensões existe no cache local do usuário
+                            if (!parsed.some(cat => cat.id === 'cat4')) {
+                                const dimensaoCat = defaultData.find(cat => cat.id === 'cat4');
+                                if (dimensaoCat) parsed.push(JSON.parse(JSON.stringify(dimensaoCat)));
+                            }
+
+                            categories.value = parsed;
+                        } catch(e) {
+                            categories.value = JSON.parse(JSON.stringify(defaultData));
+                        }
+                    } else {
+                        categories.value = JSON.parse(JSON.stringify(defaultData));
+                    }
+
+                    const localSaved = localStorage.getItem('savedPromptsData_Publicitario');
+                    if (localSaved) {
+                        savedPrompts.value = JSON.parse(localSaved);
+                    }
+                });
+
+                watch(categories, (newVal) => {
+                    localStorage.setItem('promptCategories_Publicitario', JSON.stringify(newVal));
+                }, { deep: true });
+
+                const confirmReset = () => {
+                    categories.value = JSON.parse(JSON.stringify(defaultData));
+                    localStorage.removeItem('promptCategories_Publicitario');
+                    showConfirmModal.value = false;
+                    showToast("Padrões de fábrica restaurados com sucesso.");
+                };
+
+                const onTextareaInput = (e) => {
+                    if (e && e.isTrusted) isManuallyEdited.value = true;
+                };
+
+                const toggleSelection = (elementId, option) => {
+                    if (!selections[elementId]) selections[elementId] = [];
+                    
+                    const index = selections[elementId].indexOf(option);
+                    const isAdding = index === -1;
+
+                    if (isAdding) {
+                        selections[elementId].push(option);
+                    } else {
+                        selections[elementId].splice(index, 1);
+                    }
+
+                    if (isManuallyEdited.value) {
+                        if (isAdding) insertAtCursor(option);
+                    } else {
+                        generatePromptFromSelections();
+                    }
+                };
+
+                const isSelected = (elementId, option) => {
+                    return selections[elementId] && selections[elementId].includes(option);
+                };
+
+                const addCustomTag = (elementId) => {
+                    const text = newTagNames[elementId];
+                    const tooltip = newTagTooltips[elementId] || '';
+
+                    if (text && text.trim() !== '') {
+                        for (let cat of categories.value) {
+                            const el = cat.elements.find(e => e.id === elementId);
+                            if (el) {
+                                if (!el.options.some(o => o.text === text.trim())) {
+                                    el.options.push({ text: text.trim(), tooltip: tooltip.trim() });
+                                }
+                                
+                                if (!selections[elementId]) selections[elementId] = [];
+                                if (!selections[elementId].includes(text.trim())) {
+                                    selections[elementId].push(text.trim());
+                                    
+                                    if (isManuallyEdited.value) {
+                                        insertAtCursor(text.trim());
+                                    } else {
+                                        generatePromptFromSelections();
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        newTagNames[elementId] = '';
+                        newTagTooltips[elementId] = '';
+                    }
+                };
+
+                const generatePromptFromSelections = () => {
+                    if (isManuallyEdited.value) return; 
+
+                    let promptParts = [];
+                    categories.value.forEach(category => {
+                        category.elements.forEach(element => {
+                            if (selections[element.id] && selections[element.id].length > 0) {
+                                const selectedValues = selections[element.id].join(' e ');
+                                promptParts.push(`${element.prefix} ${selectedValues}`);
+                            }
+                        });
+                    });
+                    manualPrompt.value = promptParts.join('. ') + (promptParts.length > 0 ? '.' : '');
+                };
+
+                const syncFromSelections = () => {
+                    isManuallyEdited.value = false;
+                    generatePromptFromSelections();
+                };
+
+                const insertAtCursor = (textToInsert) => {
+                    const textarea = promptTextarea.value;
+                    if (!textarea) return;
+
+                    const formattedText = ` ${textToInsert} `;
+                    
+                    if (document.activeElement !== textarea) {
+                        textarea.focus();
+                    }
+
+                    const startPos = textarea.selectionStart;
+                    const endPos = textarea.selectionEnd;
+                    const currentText = manualPrompt.value;
+                    
+                    manualPrompt.value = currentText.substring(0, startPos) 
+                                       + formattedText 
+                                       + currentText.substring(endPos, currentText.length);
+                    
+                    isManuallyEdited.value = true;
+
+                    setTimeout(() => {
+                        textarea.selectionStart = startPos + formattedText.length;
+                        textarea.selectionEnd = startPos + formattedText.length;
+                        textarea.focus();
+                    }, 10);
+                };
+
+                const saveCurrentPrompt = () => {
+                    if (!manualPrompt.value.trim()) return;
+                    savedPrompts.value.unshift({
+                        text: manualPrompt.value,
+                        date: new Date().toISOString()
+                    });
+                    localStorage.setItem('savedPromptsData_Publicitario', JSON.stringify(savedPrompts.value));
+                    activeTab.value = 'saved';
+                    showToast("Prompt salvo na biblioteca!");
+                };
+
+                const deleteSavedPrompt = (index) => {
+                    savedPrompts.value.splice(index, 1);
+                    localStorage.setItem('savedPromptsData_Publicitario', JSON.stringify(savedPrompts.value));
+                    showToast("Prompt excluído.", "success");
+                };
+
+                const loadSavedPrompt = (text) => {
+                    manualPrompt.value = text;
+                    isManuallyEdited.value = true;
+                    activeTab.value = 'editor';
+                };
+
+                const copyText = (text) => {
+                    const el = document.createElement('textarea');
+                    el.value = text;
+                    el.setAttribute('readonly', '');
+                    el.style.position = 'absolute';
+                    el.style.left = '-9999px';
+                    document.body.appendChild(el);
+                    
+                    el.select();
+                    el.setSelectionRange(0, 99999); // Suporte extra para dispositivos mobile
+                    
+                    try {
+                        document.execCommand('copy');
+                        showToast("Prompt copiado com sucesso!");
+                    } catch (err) {
+                        showToast("Erro ao copiar. Selecione manualmente.", "error");
+                    }
+                    
+                    document.body.removeChild(el);
+                };
+
+                const copyPrompt = () => {
+                    if (!manualPrompt.value) return;
+                    copyText(manualPrompt.value);
+                    copied.value = true;
+                    setTimeout(() => copied.value = false, 2000);
+                };
+
+                const clearAll = () => {
+                    for (let key in selections) delete selections[key];
+                    manualPrompt.value = "";
+                    isManuallyEdited.value = false;
+                    showToast("Área de edição limpa.");
+                };
+
+                const importJSON = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const importedData = JSON.parse(e.target.result);
+                            if (Array.isArray(importedData)) {
+                                categories.value = importedData;
+                                showToast('Tema importado com sucesso!');
+                            } else {
+                                showToast('O formato do arquivo JSON é inválido.', 'error');
+                            }
+                        } catch (err) {
+                            showToast('Erro ao ler o arquivo: ' + err.message, 'error');
+                        }
+                    };
+                    reader.readAsText(file);
+                    event.target.value = '';
+                };
+
+                return {
+                    categories, selections, newTagNames, newTagTooltips, activeTab,
+                    manualPrompt, isManuallyEdited, promptTextarea, 
+                    savedPrompts, copied,
+                    toast, showToast, showConfirmModal, confirmReset,
+                    onTextareaInput, toggleSelection, isSelected, addCustomTag,
+                    importJSON, resetToDefault: () => showConfirmModal.value = true,
+                    insertAtCursor, syncFromSelections,
+                    saveCurrentPrompt, deleteSavedPrompt, loadSavedPrompt,
+                    copyPrompt, copyText, clearAll
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
